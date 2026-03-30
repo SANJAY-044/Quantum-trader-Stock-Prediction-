@@ -8,9 +8,8 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-# Point to frontend directory relative to root
 app = Flask(__name__, static_folder="frontend", static_url_path="")
-CORS(app)
+CORS(app) # Enable CORS for all routes
 
 # Simple in-memory cache
 CACHE = {}
@@ -41,6 +40,7 @@ def calculate_indicators(df):
         df.fillna(0, inplace=True)
         
         print(f"--> [DATA PROCESSING] Appended Features: MA20, MA50, RSI, MACD")
+        print(f"--> [DATA PROCESSING] Final Processed Shape: {df.shape}")
         
     except Exception as e:
         print("Error calculating indicators:", e)
@@ -70,10 +70,17 @@ def get_stock_data(symbol, period="2y"):
         
         df = calculate_indicators(df)
         
+        print(f"--> [API RESPONSE] Compiling {len(df)} rows to JSON...")
+        
         rows = []
         for _, r in df.iterrows():
+            try:
+                d_str = r['Date'].strftime('%Y-%m-%d')
+            except:
+                d_str = str(r['Date']).split(' ')[0]
+                
             rows.append({
-                'date': r['Date'].strftime('%Y-%m-%d'),
+                'date': d_str,
                 'open': round(float(r['Open']), 4),
                 'high': round(float(r['High']), 4),
                 'low': round(float(r['Low']), 4),
@@ -104,7 +111,24 @@ def get_stock():
             return jsonify({'error': 'Invalid stock symbol or no data found'}), 404
         return jsonify(data)
     except Exception as e:
+        print(f"Error fetching data for {symbol}:")
         traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/history')
+def get_history():
+    symbol = request.args.get('symbol', 'AAPL').upper()
+    period = request.args.get('period', '2y')
+    valid_periods = ['1mo', '3mo', '6mo', '1y', '2y', '5y', 'max']
+    if period not in valid_periods:
+        return jsonify({'error': 'Invalid period'}), 400
+        
+    try:
+        data = get_stock_data(symbol, period=period)
+        if data is None:
+            return jsonify({'error': 'No data found'}), 404
+        return jsonify(data)
+    except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/log', methods=['POST'])
