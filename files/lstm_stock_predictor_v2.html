@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LSTM · Quantum Trader</title>
+<script src="https://unpkg.com/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0e0a04;
+  --s1:#160f05;
+  --s2:#1c1408;
+  --s3:#24190b;
+  --b1:#2e200c;
+  --b2:#3d2b10;
+  --b3:#4f3816;
+  --gold:#e8a020;
+  --gold2:#f5c842;
+  --gold3:#ffd96a;
+  --amr:#c47a0a;
+  --red:#e03030;
+  --red2:#ff5555;
+  --grn:#3db870;
+  --grn2:#5dd68e;
+  --cre:#ff8c42;
+  --pur:#b87fff;
+  --t1:#f0d898;
+  --t2:#a07840;
+  --t3:#5a4020;
+  --t4:#3a2a14;
+}
+html,body{height:100%;overflow:hidden;}
+body{font-family:'IBM Plex Mono',monospace;background:var(--bg);color:var(--t1);font-size:12px;}
+
+/* scanline overlay */
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:1000;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.07) 2px,rgba(0,0,0,.07) 4px);
+}
+
+/* ── Loading ── */
+#loading{
+  position:fixed;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:20px;background:var(--bg);z-index:999;
+}
+.ld-ascii{font-size:11px;color:var(--gold);line-height:1.3;text-align:center;letter-spacing:2px;}
+.ld-title{font-family:'Playfair Display',serif;font-size:28px;color:var(--gold2);letter-spacing:6px;text-shadow:0 0 30px rgba(232,160,32,.4);}
+.ld-bar{width:260px;height:1px;background:var(--b1);position:relative;overflow:visible;}
+.ld-fill{position:absolute;height:100%;background:var(--gold);box-shadow:0 0 8px var(--gold);animation:scan 1.6s ease-in-out infinite;}
+@keyframes scan{0%{width:0;left:0}50%{width:80%}100%{width:0;left:100%}}
+.ld-sub{font-size:10px;color:var(--t3);letter-spacing:2px;min-height:14px;}
+.ld-dot{width:4px;height:4px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px var(--gold);animation:blink 1s infinite;}
+@keyframes blink{50%{opacity:.1}}
+
+/* ── App ── */
+#app{display:none;flex-direction:column;height:100vh;}
+
+/* Header */
+.hdr{
+  display:flex;align-items:center;gap:12px;
+  padding:6px 16px;
+  background:var(--s1);
+  border-bottom:1px solid var(--b2);
+  flex-shrink:0;
+}
+.logo{
+  font-family:'Playfair Display',serif;
+  font-size:15px;color:var(--gold2);letter-spacing:4px;
+  text-shadow:0 0 20px rgba(245,200,66,.25);
+  white-space:nowrap;
+}
+.logo span{color:var(--t3);font-size:10px;letter-spacing:1px;font-family:'IBM Plex Mono',monospace;display:block;margin-top:-1px;}
+.sym-wrap{display:flex;gap:4px;flex-wrap:wrap;}
+.sb{
+  padding:3px 10px;border:1px solid var(--b2);border-radius:2px;
+  background:transparent;color:var(--t3);cursor:pointer;
+  font-size:10px;font-family:'IBM Plex Mono',monospace;letter-spacing:1px;
+  transition:all .15s;
+}
+.sb:hover{background:var(--s3);color:var(--t2);border-color:var(--b3);}
+.sb.on{background:rgba(232,160,32,.1);color:var(--gold);border-color:var(--amr);box-shadow:0 0 8px rgba(232,160,32,.15);}
+
+.nav-r{margin-left:auto;display:flex;gap:3px;}
+.nvb{
+  padding:3px 10px;border:1px solid var(--b1);border-radius:2px;
+  background:transparent;color:var(--t3);cursor:pointer;
+  font-size:9px;font-family:'IBM Plex Mono',monospace;letter-spacing:1px;transition:all .15s;
+}
+.nvb:hover,.nvb.on{background:var(--s3);color:var(--gold);border-color:var(--b2);}
+
+.hdr-meta{display:flex;align-items:center;gap:8px;margin-left:10px;}
+.st-txt{font-size:9px;color:var(--t3);letter-spacing:2px;}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--t4);}
+.dot.ok{background:var(--grn);box-shadow:0 0 6px var(--grn);}
+.dot.go{background:var(--gold);box-shadow:0 0 6px var(--gold);animation:blink .8s infinite;}
+.dot.er{background:var(--red);box-shadow:0 0 6px var(--red);}
+
+/* ── Tabs content ── */
+.tab-content{display:none;flex:1;overflow:hidden;min-height:0;}
+.tab-content.active{display:flex;}
+
+/* ── MAIN TAB ── */
+.body{display:grid;grid-template-columns:1fr 252px;flex:1;overflow:hidden;min-height:0;width:100%;}
+
+/* Price bar */
+.pbar{
+  display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+  padding:8px 16px;background:var(--s1);border-bottom:1px solid var(--b1);flex-shrink:0;
+}
+.prc-main{font-family:'Playfair Display',serif;font-size:26px;letter-spacing:1px;transition:color .3s;}
+.prc-chg{font-size:10px;letter-spacing:1px;margin-top:2px;}
+.prc-chg.up{color:var(--grn2)}.prc-chg.dn{color:var(--red2)}
+.ohlc{display:flex;gap:16px;}
+.stat{display:flex;flex-direction:column;gap:2px;}
+.stat-l{font-size:8px;color:var(--t3);letter-spacing:2px;text-transform:uppercase;}
+.stat-v{font-size:11px;}
+.sig{display:inline-block;padding:2px 8px;border-radius:2px;font-size:9px;letter-spacing:2px;font-weight:600;}
+.sig.buy{background:rgba(61,184,112,.1);color:var(--grn2);border:1px solid rgba(61,184,112,.3);}
+.sig.sell{background:rgba(224,48,48,.1);color:var(--red2);border:1px solid rgba(224,48,48,.3);}
+.sig.hold{background:rgba(232,160,32,.08);color:var(--gold);border:1px solid rgba(232,160,32,.2);}
+
+.left{display:flex;flex-direction:column;overflow:hidden;min-height:0;}
+.charts{flex:1;padding:10px 14px;display:flex;flex-direction:column;gap:6px;overflow:hidden;min-height:0;position:relative;}
+
+/* golden grid texture */
+.charts::before{
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+  background-image:
+    linear-gradient(rgba(46,32,12,.5) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(46,32,12,.5) 1px,transparent 1px);
+  background-size:50px 50px;
+}
+.charts>*{position:relative;z-index:1;}
+
+.ch-hdr{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.ch-ttl{font-size:9px;color:var(--t3);letter-spacing:2px;text-transform:uppercase;}
+.leg{display:flex;gap:12px;font-size:9px;color:var(--t2);}
+.leg-i{display:flex;align-items:center;gap:5px;}
+.leg-l{width:14px;height:1px;}
+.tf-w{display:flex;gap:2px;}
+.tf{padding:2px 7px;border:1px solid var(--b1);border-radius:2px;background:transparent;color:var(--t3);font-size:9px;cursor:pointer;font-family:'IBM Plex Mono';letter-spacing:1px;transition:all .1s;}
+.tf:hover,.tf.on{background:var(--s3);color:var(--gold);border-color:var(--b2);}
+.ch-main{flex:1;position:relative;min-height:0;}
+.ch-vol{position:relative;height:40px;flex-shrink:0;}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;flex-shrink:0;}
+.mc{padding:7px 10px;background:var(--s2);border:1px solid var(--b1);border-radius:3px;position:relative;overflow:hidden;}
+.mc::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--amr),transparent);opacity:.4;}
+.mc-l{font-size:8px;color:var(--t3);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;}
+.mc-v{font-size:15px;font-family:'Playfair Display',serif;}
+.mc-v.g{color:var(--grn)}.mc-v.r{color:var(--red2)}.mc-v.au{color:var(--gold2)}
+
+/* RIGHT */
+.right{border-left:1px solid var(--b1);background:var(--s1);display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;}
+.sec{padding:11px 13px;border-bottom:1px solid var(--b1);}
+.sec-t{font-size:8px;color:var(--amr);letter-spacing:3px;text-transform:uppercase;margin-bottom:10px;}
+.cg{margin-bottom:10px;}
+.cg-lbl{display:flex;justify-content:space-between;font-size:10px;color:var(--t2);margin-bottom:5px;}
+.cg-v{color:var(--gold2);}
+input[type=range]{width:100%;height:1px;appearance:none;background:var(--b2);border-radius:1px;outline:none;cursor:pointer;}
+input[type=range]::-webkit-slider-thumb{appearance:none;width:10px;height:10px;border-radius:50%;background:var(--gold);cursor:pointer;box-shadow:0 0 6px rgba(232,160,32,.5);}
+input[type=range]::-moz-range-thumb{width:10px;height:10px;border-radius:50%;background:var(--gold);cursor:pointer;border:none;}
+.train-btn{
+  width:100%;padding:9px;background:transparent;
+  border:1px solid var(--amr);border-radius:3px;
+  color:var(--gold);font-size:10px;font-family:'IBM Plex Mono';
+  cursor:pointer;letter-spacing:3px;transition:all .2s;
+  position:relative;overflow:hidden;
+}
+.train-btn::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(232,160,32,.05),transparent);transition:opacity .2s;}
+.train-btn:hover:not(:disabled){background:rgba(232,160,32,.06);box-shadow:0 0 16px rgba(232,160,32,.2);border-color:var(--gold2);}
+.train-btn:disabled{opacity:.3;cursor:not-allowed;}
+.prog{width:100%;height:1px;background:var(--b1);border-radius:1px;margin-top:8px;overflow:hidden;}
+.prog-f{height:100%;background:linear-gradient(90deg,var(--amr),var(--gold2));width:0%;transition:width .3s;}
+.ep-t{font-size:9px;color:var(--t3);margin-top:5px;letter-spacing:.5px;}
+.arch{display:flex;flex-direction:column;gap:3px;}
+.arch-row{display:flex;align-items:center;gap:5px;}
+.arch-box{flex:1;padding:3px 6px;border-radius:2px;font-size:9px;text-align:center;border:1px solid;letter-spacing:.5px;}
+.arch-box.inp{background:rgba(232,160,32,.06);border-color:rgba(232,160,32,.25);color:var(--gold);}
+.arch-box.lstm{background:rgba(184,127,255,.06);border-color:rgba(184,127,255,.25);color:var(--pur);}
+.arch-box.drop{background:rgba(255,140,66,.06);border-color:rgba(255,140,66,.2);color:var(--cre);}
+.arch-box.dense{background:rgba(61,184,112,.05);border-color:rgba(61,184,112,.2);color:var(--grn);}
+.arch-box.out{background:rgba(224,48,48,.05);border-color:rgba(224,48,48,.2);color:var(--red2);}
+.arch-arr{font-size:8px;color:var(--t3);}
+.loss-wrap{position:relative;height:90px;}
+.pred-list{display:flex;flex-direction:column;gap:3px;}
+.pi{display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:var(--s2);border:1px solid var(--b1);border-radius:2px;transition:border-color .2s;}
+.pi:hover{border-color:var(--b3);}
+.pi-date{font-size:9px;color:var(--t3);}
+.pi-price{font-family:'Playfair Display',serif;font-size:12px;}
+.pi-chg{font-size:9px;}
+.pi-chg.up{color:var(--grn)}.pi-chg.dn{color:var(--red2)}
+.empty-msg{font-size:9px;color:var(--t3);padding:6px 0;letter-spacing:1px;}
+
+/* ── GUIDE TAB ── */
+.guide{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px 24px;}
+.g-h1{font-family:'Playfair Display',serif;font-size:22px;color:var(--gold2);letter-spacing:4px;margin-bottom:6px;}
+.g-sub{font-size:10px;color:var(--t3);letter-spacing:2px;margin-bottom:24px;padding-bottom:14px;border-bottom:1px solid var(--b1);}
+.g-section{margin-bottom:28px;}
+.g-h2{font-size:11px;color:var(--gold);letter-spacing:3px;text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+.g-h2::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--b2),transparent);}
+.g-h3{font-size:10px;color:var(--cre);letter-spacing:2px;margin-bottom:8px;margin-top:14px;}
+.g-p{font-size:11px;color:var(--t2);line-height:1.8;margin-bottom:10px;}
+.g-note{padding:10px 12px;background:rgba(232,160,32,.05);border-left:2px solid var(--amr);border-radius:0 3px 3px 0;margin-bottom:12px;}
+.g-note p{font-size:10px;color:var(--t2);line-height:1.7;margin:0;}
+.g-note strong{color:var(--gold2);}
+.g-warn{padding:10px 12px;background:rgba(224,48,48,.05);border-left:2px solid var(--red);border-radius:0 3px 3px 0;margin-bottom:12px;}
+.g-warn p{font-size:10px;color:var(--t2);line-height:1.7;margin:0;}
+.g-warn strong{color:var(--red2);}
+.g-ok{padding:10px 12px;background:rgba(61,184,112,.05);border-left:2px solid var(--grn);border-radius:0 3px 3px 0;margin-bottom:12px;}
+.g-ok p{font-size:10px;color:var(--t2);line-height:1.7;margin:0;}
+.g-ok strong{color:var(--grn2);}
+.step-list{display:flex;flex-direction:column;gap:10px;}
+.step{display:flex;gap:12px;align-items:flex-start;}
+.step-num{min-width:24px;height:24px;border-radius:2px;background:rgba(232,160,32,.1);border:1px solid var(--amr);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--gold);flex-shrink:0;}
+.step-body{flex:1;}
+.step-t{font-size:11px;color:var(--t1);margin-bottom:3px;letter-spacing:.5px;}
+.step-d{font-size:10px;color:var(--t2);line-height:1.6;}
+.code-block{background:var(--s2);border:1px solid var(--b2);border-radius:3px;padding:10px 12px;margin:8px 0;font-size:10px;color:var(--gold3);line-height:1.7;overflow-x:auto;}
+.code-block .cm{color:var(--t3);}
+.code-block .ck{color:var(--pur);}
+.code-block .cv{color:var(--cre);}
+.code-block .cs{color:var(--grn2);}
+.api-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;}
+.api-card{padding:10px 12px;background:var(--s2);border:1px solid var(--b1);border-radius:3px;}
+.api-card-t{font-size:9px;color:var(--gold);letter-spacing:2px;margin-bottom:5px;}
+.api-card-v{font-size:10px;color:var(--t2);line-height:1.6;}
+.api-card-v a{color:var(--cre);text-decoration:none;}
+.arch-diagram{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0;}
+.ad-box{padding:8px;background:var(--s2);border:1px solid var(--b1);border-radius:3px;text-align:center;}
+.ad-box-t{font-size:9px;color:var(--t3);letter-spacing:1px;margin-bottom:4px;}
+.ad-box-v{font-size:11px;color:var(--t1);}
+.timeline{display:flex;flex-direction:column;gap:0;}
+.tl-row{display:flex;gap:0;align-items:stretch;}
+.tl-line{display:flex;flex-direction:column;align-items:center;width:28px;flex-shrink:0;}
+.tl-dot{width:8px;height:8px;border-radius:50%;border:1px solid var(--amr);background:rgba(232,160,32,.15);flex-shrink:0;margin-top:4px;}
+.tl-vl{width:1px;background:var(--b2);flex:1;margin:3px 0;}
+.tl-body{padding:0 0 16px 4px;flex:1;}
+.tl-t{font-size:10px;color:var(--gold2);letter-spacing:1px;margin-bottom:3px;}
+.tl-d{font-size:10px;color:var(--t2);line-height:1.6;}
+.param-table{width:100%;border-collapse:collapse;margin:8px 0;font-size:10px;}
+.param-table th{padding:6px 8px;background:var(--s3);color:var(--amr);text-align:left;font-size:8px;letter-spacing:2px;border-bottom:1px solid var(--b2);}
+.param-table td{padding:6px 8px;border-bottom:1px solid var(--b1);color:var(--t2);vertical-align:top;line-height:1.5;}
+.param-table td:first-child{color:var(--gold3);}
+.param-table tr:last-child td{border-bottom:none;}
+
+::-webkit-scrollbar{width:3px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--b3);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="ld-ascii">◈ ◈ ◈</div>
+  <div class="ld-title">QUANTUM TRADER</div>
+  <div style="font-size:9px;color:var(--t3);letter-spacing:4px;margin-top:-10px;">LSTM · NEURAL · FORECASTING</div>
+  <div class="ld-bar"><div class="ld-fill"></div></div>
+  <div class="ld-sub" id="ldSub">INITIALIZING TENSORFLOW ENGINE</div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <!-- Header -->
+  <div class="hdr">
+    <div class="logo">QT<span>QUANTUM TRADER v2.0</span></div>
+    <div class="sym-wrap">
+      <button class="sb on" onclick="selectStock('AAPL',this)">AAPL</button>
+      <button class="sb" onclick="selectStock('TSLA',this)">TSLA</button>
+      <button class="sb" onclick="selectStock('MSFT',this)">MSFT</button>
+      <button class="sb" onclick="selectStock('GOOGL',this)">GOOGL</button>
+      <button class="sb" onclick="selectStock('NVDA',this)">NVDA</button>
+      <button class="sb" onclick="selectStock('AMZN',this)">AMZN</button>
+      <button class="sb" onclick="selectStock('META',this)">META</button>
+    </div>
+    <div class="nav-r">
+      <button class="nvb on" onclick="switchTab('main',this)">◈ CHART</button>
+      <button class="nvb" onclick="switchTab('guide',this)">⬡ HOW TO RUN LIVE</button>
+    </div>
+    <div class="hdr-meta">
+      <span class="st-txt" id="stTxt">IDLE</span>
+      <div class="dot" id="stDot"></div>
+    </div>
+  </div>
+
+  <!-- MAIN TAB -->
+  <div class="tab-content active" id="tab-main">
+    <div class="body" style="width:100%;display:grid;grid-template-columns:1fr 252px;overflow:hidden;min-height:0;">
+      <div class="left">
+        <div class="pbar">
+          <div>
+            <div class="prc-main" id="prcMain">$0.00</div>
+            <div class="prc-chg" id="prcChg">— —</div>
+          </div>
+          <div class="ohlc">
+            <div class="stat"><div class="stat-l">Open</div><div class="stat-v" id="sOpen">—</div></div>
+            <div class="stat"><div class="stat-l">High</div><div class="stat-v" id="sHigh">—</div></div>
+            <div class="stat"><div class="stat-l">Low</div><div class="stat-v" id="sLow">—</div></div>
+            <div class="stat"><div class="stat-l">Volume</div><div class="stat-v" id="sVol">—</div></div>
+            <div class="stat"><div class="stat-l">Signal</div><div class="stat-v" id="sSig"><span class="sig hold">HOLD</span></div></div>
+          </div>
+        </div>
+        <div class="charts">
+          <div class="ch-hdr">
+            <div style="display:flex;align-items:center;gap:14px;">
+              <span class="ch-ttl">Price History &amp; LSTM Forecast</span>
+              <div class="leg">
+                <div class="leg-i"><div class="leg-l" style="background:#e8a020;"></div>Historical</div>
+                <div class="leg-i"><div class="leg-l" style="background:#3db870;"></div>LSTM Forecast</div>
+              </div>
+            </div>
+            <div class="tf-w">
+              <button class="tf" onclick="setTF(60,this)">1M</button>
+              <button class="tf" onclick="setTF(90,this)">3M</button>
+              <button class="tf on" onclick="setTF(180,this)">6M</button>
+              <button class="tf" onclick="setTF(365,this)">1Y</button>
+            </div>
+          </div>
+          <div class="ch-main"><canvas id="cMain"></canvas></div>
+          <div class="ch-vol"><canvas id="cVol"></canvas></div>
+          <div class="metrics">
+            <div class="mc"><div class="mc-l">RMSE</div><div class="mc-v" id="mRmse">—</div></div>
+            <div class="mc"><div class="mc-l">MAPE</div><div class="mc-v" id="mMape">—</div></div>
+            <div class="mc"><div class="mc-l">Train Loss</div><div class="mc-v au" id="mLoss">—</div></div>
+            <div class="mc"><div class="mc-l">Accuracy</div><div class="mc-v g" id="mAcc">—</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <div class="sec">
+          <div class="sec-t">Hyperparameters</div>
+          <div class="cg"><div class="cg-lbl"><span>Window Size (days)</span><span class="cg-v" id="vW">20</span></div><input type="range" min="10" max="50" value="20" step="5" oninput="document.getElementById('vW').textContent=this.value"></div>
+          <div class="cg"><div class="cg-lbl"><span>Forecast Days</span><span class="cg-v" id="vF">10</span></div><input type="range" min="5" max="30" value="10" step="5" oninput="document.getElementById('vF').textContent=this.value"></div>
+          <div class="cg"><div class="cg-lbl"><span>Epochs</span><span class="cg-v" id="vE">60</span></div><input type="range" min="10" max="150" value="60" step="10" oninput="document.getElementById('vE').textContent=this.value"></div>
+          <div class="cg"><div class="cg-lbl"><span>LSTM Units</span><span class="cg-v" id="vU">48</span></div><input type="range" min="16" max="96" value="48" step="16" oninput="document.getElementById('vU').textContent=this.value"></div>
+          <div class="cg"><div class="cg-lbl"><span>Learning Rate</span><span class="cg-v" id="vL">0.001</span></div><input type="range" min="1" max="5" value="3" step="1" id="lrSlider" oninput="setLR(this.value)"></div>
+          <button class="train-btn" id="tBtn" onclick="startTraining()">▶ TRAIN &amp; FORECAST</button>
+          <div class="prog"><div class="prog-f" id="pFill"></div></div>
+          <div class="ep-t" id="epTxt">READY TO TRAIN</div>
+        </div>
+        <div class="sec">
+          <div class="sec-t">Network Architecture</div>
+          <div class="arch" id="archViz">
+            <div class="arch-row"><div class="arch-box inp">Input [20 × 1]</div></div>
+            <div class="arch-row"><div class="arch-arr">↓</div></div>
+            <div class="arch-row"><div class="arch-box lstm">LSTM (48 units, seq)</div></div>
+            <div class="arch-row"><div class="arch-arr">↓</div></div>
+            <div class="arch-row"><div class="arch-box drop">Dropout 0.20</div></div>
+            <div class="arch-row"><div class="arch-arr">↓</div></div>
+            <div class="arch-row"><div class="arch-box lstm">LSTM (24 units)</div></div>
+            <div class="arch-row"><div class="arch-arr">↓</div></div>
+            <div class="arch-row"><div class="arch-box drop">Dropout 0.10</div></div>
+            <div class="arch-row"><div class="arch-arr">↓</div></div>
+            <div class="arch-row"><div class="arch-box dense">Dense (8, ReLU)</div></div>
+            <div class="arch-row"><div class="arch-arr">↓</div></div>
+            <div class="arch-row"><div class="arch-box out">Output [1] → $price</div></div>
+          </div>
+        </div>
+        <div class="sec"><div class="sec-t">Loss Curve</div><div class="loss-wrap"><canvas id="cLoss"></canvas></div></div>
+        <div class="sec" style="flex:1;min-height:160px;">
+          <div class="sec-t">Forecast Output</div>
+          <div class="pred-list" id="predList"><div class="empty-msg">TRAIN MODEL TO GENERATE FORECAST</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GUIDE TAB -->
+  <div class="tab-content" id="tab-guide">
+    <div class="guide">
+      <div class="g-h1">HOW TO RUN LIVE</div>
+      <div class="g-sub">COMPLETE GUIDE · REAL-TIME STOCK DATA · PRODUCTION DEPLOYMENT</div>
+
+      <div class="g-section">
+        <div class="g-h2">What This App Does Right Now</div>
+        <p class="g-p">This app runs a real LSTM neural network entirely in your browser using TensorFlow.js. The stock price data is <strong style="color:var(--gold2)">simulated</strong> using Geometric Brownian Motion — the same mathematical model used by real quant traders. The LSTM model truly trains; the loss curve, RMSE, and MAPE are real neural network outputs.</p>
+        <div class="g-note"><p><strong>Current Mode:</strong> Simulated data + real LSTM training (100% browser, no server needed)</p></div>
+        <div class="g-warn"><p><strong>NOT real-time yet:</strong> To use actual live market prices, you need a real stock data API. See the options below.</p></div>
+      </div>
+
+      <div class="g-section">
+        <div class="g-h2">Option A — Free Real-Time Data APIs</div>
+        <div class="api-grid">
+          <div class="api-card">
+            <div class="api-card-t">◈ ALPHA VANTAGE</div>
+            <div class="api-card-v">Free tier: 25 req/day<br>Daily + intraday OHLCV<br>Key: free signup<br><a href="https://www.alphavantage.co" target="_blank">alphavantage.co</a></div>
+          </div>
+          <div class="api-card">
+            <div class="api-card-t">◈ YAHOO FINANCE</div>
+            <div class="api-card-v">Unofficial free API<br>via yfinance Python lib<br>or rapidapi proxy<br>No key needed (unoffic.)</div>
+          </div>
+          <div class="api-card">
+            <div class="api-card-t">◈ POLYGON.IO</div>
+            <div class="api-card-v">Free: 5 req/min<br>Stocks, crypto, forex<br>Real-time WebSocket<br><a href="https://polygon.io" target="_blank">polygon.io</a></div>
+          </div>
+          <div class="api-card">
+            <div class="api-card-t">◈ TWELVE DATA</div>
+            <div class="api-card-v">Free: 800 req/day<br>WebSocket streams<br>Technical indicators<br><a href="https://twelvedata.com" target="_blank">twelvedata.com</a></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="g-section">
+        <div class="g-h2">Option B — Replace Simulated Data (Code Changes)</div>
+        <p class="g-p">Find the <code style="color:var(--gold3)">genData()</code> function in the HTML source and replace it with this Alpha Vantage fetch:</p>
+        <div class="code-block">
+<span class="cm">// Replace genData(symbol) with this:</span>
+<span class="ck">async function</span> <span class="cv">fetchLiveData</span>(symbol) {
+  <span class="ck">const</span> KEY = <span class="cs">'YOUR_API_KEY_HERE'</span>;
+  <span class="ck">const</span> url = <span class="cs">`https://www.alphavantage.co/query
+    ?function=TIME_SERIES_DAILY
+    &symbol=${symbol}
+    &outputsize=full
+    &apikey=${KEY}`</span>;
+
+  <span class="ck">const</span> res = <span class="ck">await</span> fetch(url);
+  <span class="ck">const</span> json = <span class="ck">await</span> res.json();
+  <span class="ck">const</span> ts = json[<span class="cs">'Time Series (Daily)'</span>];
+
+  <span class="ck">return</span> Object.entries(ts)
+    .map(([date, v]) => ({
+      date,
+      open:  +v[<span class="cs">'1. open'</span>],
+      high:  +v[<span class="cs">'2. high'</span>],
+      low:   +v[<span class="cs">'3. low'</span>],
+      close: +v[<span class="cs">'4. close'</span>],
+      vol:   +v[<span class="cs">'5. volume'</span>]
+    }))
+    .reverse(); <span class="cm">// oldest → newest</span>
+}
+        </div>
+        <div class="g-ok"><p><strong>Tip:</strong> Cache the result in <code style="color:var(--gold3)">localStorage</code> so you don't burn API quota on every page reload.</p></div>
+      </div>
+
+      <div class="g-section">
+        <div class="g-h2">Option C — Full Python Backend (Production)</div>
+        <p class="g-p">For a production system, run a lightweight Python server that fetches data and retrains the model server-side:</p>
+        <div class="g-h3">1 · Install Dependencies</div>
+        <div class="code-block">
+<span class="cm"># Install required packages</span>
+pip install yfinance pandas numpy flask tensorflow scikit-learn
+        </div>
+        <div class="g-h3">2 · Python Backend (server.py)</div>
+        <div class="code-block">
+<span class="ck">import</span> yfinance <span class="ck">as</span> yf
+<span class="ck">from</span> flask <span class="ck">import</span> Flask, jsonify, request
+<span class="ck">import</span> numpy <span class="ck">as</span> np
+
+app = Flask(__name__)
+
+<span class="ck">@app.route</span>(<span class="cs">'/api/stock'</span>)
+<span class="ck">def</span> <span class="cv">get_stock</span>():
+    symbol = request.args.get(<span class="cs">'symbol'</span>, <span class="cs">'AAPL'</span>)
+    df = yf.download(symbol, period=<span class="cs">'2y'</span>, interval=<span class="cs">'1d'</span>)
+    df = df.reset_index()
+    rows = []
+    <span class="ck">for</span> _, r <span class="ck">in</span> df.iterrows():
+        rows.append({
+            <span class="cs">'date'</span>:  r[<span class="cs">'Date'</span>].strftime(<span class="cs">'%Y-%m-%d'</span>),
+            <span class="cs">'open'</span>:  round(float(r[<span class="cs">'Open'</span>]), 2),
+            <span class="cs">'high'</span>:  round(float(r[<span class="cs">'High'</span>]), 2),
+            <span class="cs">'low'</span>:   round(float(r[<span class="cs">'Low'</span>]), 2),
+            <span class="cs">'close'</span>: round(float(r[<span class="cs">'Close'</span>]), 2),
+            <span class="cs">'vol'</span>:   int(r[<span class="cs">'Volume'</span>])
+        })
+    <span class="ck">return</span> jsonify(rows)
+
+<span class="ck">if</span> __name__ == <span class="cs">'__main__'</span>:
+    app.run(port=<span class="cv">5000</span>)
+        </div>
+        <div class="g-h3">3 · Run the Server</div>
+        <div class="code-block">
+python server.py
+<span class="cm"># Server starts at http://localhost:5000</span>
+<span class="cm"># Test: curl http://localhost:5000/api/stock?symbol=AAPL</span>
+        </div>
+        <div class="g-h3">4 · Connect This App to the Backend</div>
+        <div class="code-block">
+<span class="cm">// In the HTML, replace DB[s] = genData(s) with:</span>
+<span class="ck">async function</span> <span class="cv">loadStock</span>(symbol) {
+  <span class="ck">const</span> res = <span class="ck">await</span> fetch(
+    <span class="cs">`http://localhost:5000/api/stock?symbol=${symbol}`</span>
+  );
+  DB[symbol] = <span class="ck">await</span> res.json();
+}
+        </div>
+      </div>
+
+      <div class="g-section">
+        <div class="g-h2">Auto-Retrain Schedule</div>
+        <p class="g-p">For continuous real-time operation, set up automatic retraining when new market data arrives:</p>
+        <div class="timeline">
+          <div class="tl-row">
+            <div class="tl-line"><div class="tl-dot"></div><div class="tl-vl"></div></div>
+            <div class="tl-body">
+              <div class="tl-t">09:30 ET — Market Opens</div>
+              <div class="tl-d">Fetch overnight data from API. Load pre-trained model weights from localStorage or server. Show yesterday's predictions vs actual open prices.</div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-line"><div class="tl-dot"></div><div class="tl-vl"></div></div>
+            <div class="tl-body">
+              <div class="tl-t">Every 60 Minutes — Intraday Refresh</div>
+              <div class="tl-d">Fetch latest hourly candle. Append to window buffer. Re-run forward pass (predict only, no retrain) to update forecast in real time. Update BUY/SELL signal.</div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-line"><div class="tl-dot"></div><div class="tl-vl"></div></div>
+            <div class="tl-body">
+              <div class="tl-t">16:00 ET — Market Close</div>
+              <div class="tl-d">Append final closing price to dataset. Trigger full model retrain on updated dataset. Save new model weights. Log RMSE and MAPE to history.</div>
+            </div>
+          </div>
+          <div class="tl-row">
+            <div class="tl-line"><div class="tl-dot"></div></div>
+            <div class="tl-body">
+              <div class="tl-t">After Hours — Evaluation</div>
+              <div class="tl-d">Compare today's LSTM forecast vs actual prices. Track prediction accuracy over rolling 30-day window. Alert if MAPE exceeds 5% threshold.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="g-section">
+        <div class="g-h2">Hyperparameter Tuning Guide</div>
+        <table class="param-table">
+          <thead><tr><th>Parameter</th><th>Recommended</th><th>Effect</th></tr></thead>
+          <tbody>
+            <tr><td>Window Size</td><td>20–30 days</td><td>Larger = more context, slower training. 20 is standard for daily close.</td></tr>
+            <tr><td>Forecast Days</td><td>5–15 days</td><td>Beyond 15 days accuracy drops sharply — compounding prediction errors.</td></tr>
+            <tr><td>Epochs</td><td>60–100</td><td>Watch the loss curve. Stop when it flattens (early stopping prevents overfit).</td></tr>
+            <tr><td>LSTM Units</td><td>48–64</td><td>More units = more capacity. Diminishing returns past 96 for daily stock data.</td></tr>
+            <tr><td>Learning Rate</td><td>0.001</td><td>Too high = diverges. Too low = slow. 0.001 is the Adam optimizer sweet spot.</td></tr>
+            <tr><td>Batch Size</td><td>32</td><td>Fixed in code. Larger = more stable gradients but more memory.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="g-section">
+        <div class="g-h2">Deploy to the Web</div>
+        <div class="step-list">
+          <div class="step"><div class="step-num">1</div><div class="step-body"><div class="step-t">GitHub Pages (Free, 5 min)</div><div class="step-d">Push the HTML file to a GitHub repo → Settings → Pages → Deploy from main branch. Your app is live at <code style="color:var(--gold3)">username.github.io/repo</code>. CORS headers may block direct API calls — use a proxy.</div></div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-body"><div class="step-t">Netlify / Vercel (Free tier, with backend)</div><div class="step-d">Deploy the HTML as a static site. Add a serverless function (<code style="color:var(--gold3)">/api/stock.js</code>) that fetches from Alpha Vantage server-side, avoiding CORS. Deploy in under 2 minutes with drag-and-drop.</div></div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-body"><div class="step-t">Docker + VPS ($5/mo)</div><div class="step-d">Package the Python Flask server into a Docker container. Deploy to a DigitalOcean Droplet or AWS EC2. Set up a cron job for market-hours retraining. Use nginx as reverse proxy.</div></div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-body"><div class="step-t">Streamlit Cloud (Free Python UI)</div><div class="step-d">Rewrite the frontend in Streamlit for a fully Python solution. Use <code style="color:var(--gold3)">st.line_chart()</code> for the price chart and <code style="color:var(--gold3)">st.cache_data</code> for data caching. Deploy free at streamlit.io/cloud.</div></div></div>
+        </div>
+      </div>
+
+      <div class="g-section">
+        <div class="g-h2">Important Disclaimer</div>
+        <div class="g-warn"><p><strong>NOT FINANCIAL ADVICE.</strong> LSTM models can identify historical patterns but cannot predict actual future stock prices with reliable accuracy. Financial markets are influenced by news, earnings, macroeconomics, and random events that no ML model can anticipate. <strong>Never use this — or any model — as the sole basis for real trading decisions.</strong></p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const LRS=[0.0001,0.0005,0.001,0.003,0.01];
+let sym='AAPL',showDays=180,DB={},C={},lossHist=[],mdl=null,busy=false;
+
+function switchTab(t,btn){
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.nvb').forEach(b=>b.classList.remove('on'));
+  document.getElementById('tab-'+t).classList.add('active');
+  if(btn)btn.classList.add('on');
+}
+
+function mkRng(seed){let s=((seed^(seed<<13))>>>0)||1;return()=>{s^=s<<13;s^=s>>17;s^=s<<5;return(s>>>0)/4294967296;};}
+function bm(rng){let u=0;while(u===0)u=rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*rng());}
+const SP={AAPL:{p0:145,mu:.00028,sig:.015},TSLA:{p0:210,mu:.00008,sig:.032},MSFT:{p0:350,mu:.00031,sig:.013},GOOGL:{p0:130,mu:.00025,sig:.016},NVDA:{p0:420,mu:.0006,sig:.028},AMZN:{p0:162,mu:.00022,sig:.018},META:{p0:290,mu:.00035,sig:.024}};
+function genData(sym){const{p0,mu,sig}=SP[sym];const seed=sym.split('').reduce((a,c,i)=>a+c.charCodeAt(0)*(i+7)*37,0);const rng=mkRng(seed);let price=p0;const rows=[];const base=new Date('2022-06-01');for(let i=0;rows.length<550;i++){const d=new Date(base);d.setDate(d.getDate()+i);if(d.getDay()===0||d.getDay()===6)continue;price*=Math.exp((mu-.5*sig*sig)+sig*bm(rng));const r=price*sig*.9;const open=price*(1+(rng()-.5)*sig*.7);const high=Math.max(price,open)+r*rng()*.5;const low=Math.min(price,open)-r*rng()*.5;const vol=Math.floor((8e6+rng()*4e7)*(1+Math.abs(bm(rng))*.3));rows.push({date:d.toISOString().slice(0,10),open:+open.toFixed(2),high:+high.toFixed(2),low:+low.toFixed(2),close:+price.toFixed(2),vol});}return rows;}
+function norm(arr){const mn=Math.min(...arr),mx=Math.max(...arr);return{n:arr.map(v=>(v-mn)/(mx-mn)),mn,mx};}
+function denorm(arr,mn,mx){return arr.map(v=>v*(mx-mn)+mn);}
+function mkSeqs(data,W){const X=[],y=[];for(let i=W;i<data.length;i++){X.push(data.slice(i-W,i).map(v=>[v]));y.push(data[i]);}return{X,y};}
+function buildMdl(W,units,lr){if(mdl){mdl.dispose();mdl=null;}const m=tf.sequential();m.add(tf.layers.lstm({units,returnSequences:true,inputShape:[W,1]}));m.add(tf.layers.dropout({rate:.2}));m.add(tf.layers.lstm({units:Math.max(8,Math.floor(units/2)),returnSequences:false}));m.add(tf.layers.dropout({rate:.1}));m.add(tf.layers.dense({units:8,activation:'relu'}));m.add(tf.layers.dense({units:1}));m.compile({optimizer:tf.train.adam(lr),loss:'meanSquaredError',metrics:['mae']});return m;}
+function updateArch(W,units){document.getElementById('archViz').innerHTML=`<div class="arch-row"><div class="arch-box inp">Input [${W} × 1]</div></div><div class="arch-row"><div class="arch-arr">↓</div></div><div class="arch-row"><div class="arch-box lstm">LSTM (${units} units, seq=true)</div></div><div class="arch-row"><div class="arch-arr">↓</div></div><div class="arch-row"><div class="arch-box drop">Dropout (0.20)</div></div><div class="arch-row"><div class="arch-arr">↓</div></div><div class="arch-row"><div class="arch-box lstm">LSTM (${Math.max(8,Math.floor(units/2))} units)</div></div><div class="arch-row"><div class="arch-arr">↓</div></div><div class="arch-row"><div class="arch-box drop">Dropout (0.10)</div></div><div class="arch-row"><div class="arch-arr">↓</div></div><div class="arch-row"><div class="arch-box dense">Dense (8, ReLU)</div></div><div class="arch-row"><div class="arch-arr">↓</div></div><div class="arch-row"><div class="arch-box out">Output [1] → $price</div></div>`;}
+function setLR(v){document.getElementById('vL').textContent=LRS[v-1];}
+
+function initCharts(){
+  const grid={color:'rgba(46,32,12,.6)',lineWidth:.5};
+  const tick={color:'#3a2a14',font:{family:"'IBM Plex Mono',monospace",size:9}};
+  C.main=new Chart(document.getElementById('cMain').getContext('2d'),{type:'line',data:{labels:[],datasets:[{label:'Price',data:[],borderColor:'#e8a020',borderWidth:1.5,pointRadius:0,tension:.15,fill:{target:'origin',above:'rgba(232,160,32,.04)'}},{label:'Forecast',data:[],borderColor:'#3db870',borderWidth:2,borderDash:[6,3],pointRadius:3,pointBackgroundColor:'#3db870',pointBorderColor:'#3db870',tension:.3,fill:false}]},options:{responsive:true,maintainAspectRatio:false,animation:{duration:300},interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{backgroundColor:'#160f05',borderColor:'#2e200c',borderWidth:1,titleColor:'#a07840',bodyColor:'#f0d898',titleFont:{family:"'IBM Plex Mono',monospace",size:9},bodyFont:{family:"'IBM Plex Mono',monospace",size:10},callbacks:{label:ctx=>{if(ctx.parsed.y===null)return null;return`  ${ctx.dataset.label}: $${ctx.parsed.y.toFixed(2)}`;}}}},scales:{x:{grid,ticks:{...tick,maxTicksLimit:8,maxRotation:0}},y:{position:'right',grid,ticks:{...tick,callback:v=>'$'+v.toFixed(0)}}}}});
+  C.vol=new Chart(document.getElementById('cVol').getContext('2d'),{type:'bar',data:{labels:[],datasets:[{data:[],backgroundColor:'rgba(196,122,10,.12)',borderRadius:1,borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,animation:{duration:200},plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{display:false},y:{display:false}}}});
+  C.loss=new Chart(document.getElementById('cLoss').getContext('2d'),{type:'line',data:{labels:[],datasets:[{label:'Loss',data:[],borderColor:'#c47a0a',borderWidth:1.5,pointRadius:0,tension:.4,fill:{target:'origin',above:'rgba(196,122,10,.06)'}}]},options:{responsive:true,maintainAspectRatio:false,animation:{duration:50},plugins:{legend:{display:false}},scales:{x:{display:false},y:{grid:{color:'rgba(46,32,12,.5)',lineWidth:.5},ticks:{color:'#3a2a14',font:{size:9},maxTicksLimit:4,callback:v=>v.toExponential(1)}}}}});
+}
+
+function refreshChart(data,preds){
+  const show=data.slice(-showDays);
+  const labels=show.map(d=>d.date.slice(5));
+  const prices=show.map(d=>d.close);
+  const predArr=[...new Array(show.length-1).fill(null),show[show.length-1].close,...preds];
+  const futLabels=[];const ld=new Date(data[data.length-1].date);
+  for(let i=1;i<=preds.length;i++){const dd=new Date(ld);dd.setDate(dd.getDate()+i);futLabels.push(dd.toISOString().slice(5,10));}
+  C.main.data.labels=[...labels,...futLabels];
+  C.main.data.datasets[0].data=[...prices,...new Array(preds.length).fill(null)];
+  C.main.data.datasets[1].data=predArr;
+  C.main.update('active');
+  C.vol.data.labels=labels;
+  C.vol.data.datasets[0].data=show.map(d=>d.vol);
+  C.vol.update('none');
+}
+
+function refreshInfo(data){
+  const l=data[data.length-1],p=data[data.length-2];
+  const chg=l.close-p.close,pct=chg/p.close*100,up=chg>=0;
+  const pm=document.getElementById('prcMain');
+  pm.textContent='$'+l.close.toFixed(2);pm.style.color=up?'var(--grn2)':'var(--red2)';
+  const ce=document.getElementById('prcChg');
+  ce.textContent=(up?'▲ +':'▼ ')+Math.abs(chg).toFixed(2)+' ('+(up?'+':'')+pct.toFixed(2)+'%)';
+  ce.className='prc-chg '+(up?'up':'dn');
+  document.getElementById('sOpen').textContent='$'+l.open.toFixed(2);
+  document.getElementById('sHigh').textContent='$'+l.high.toFixed(2);
+  document.getElementById('sLow').textContent='$'+l.low.toFixed(2);
+  document.getElementById('sVol').textContent=(l.vol/1e6).toFixed(1)+'M';
+  const sma5=data.slice(-5).reduce((a,d)=>a+d.close,0)/5;
+  const sma20=data.slice(-20).reduce((a,d)=>a+d.close,0)/20;
+  const se=document.getElementById('sSig');
+  if(sma5>sma20*1.006)se.innerHTML='<span class="sig buy">BUY</span>';
+  else if(sma5<sma20*0.994)se.innerHTML='<span class="sig sell">SELL</span>';
+  else se.innerHTML='<span class="sig hold">HOLD</span>';
+}
+
+function selectStock(s,btn){
+  sym=s;
+  document.querySelectorAll('.sb').forEach(b=>b.classList.remove('on'));
+  if(btn)btn.classList.add('on');
+  if(!DB[s])DB[s]=genData(s);
+  refreshInfo(DB[s]);refreshChart(DB[s],[]);
+  document.getElementById('predList').innerHTML='<div class="empty-msg">TRAIN MODEL TO GENERATE FORECAST</div>';
+  ['mRmse','mMape','mLoss','mAcc'].forEach(id=>{const el=document.getElementById(id);el.textContent='—';el.className='mc-v';});
+  if(mdl){mdl.dispose();mdl=null;}
+}
+
+function setTF(d,btn){showDays=d;document.querySelectorAll('.tf').forEach(b=>b.classList.remove('on'));if(btn)btn.classList.add('on');if(DB[sym])refreshChart(DB[sym],[]);}
+function setSt(cls,txt){document.getElementById('stDot').className='dot '+cls;document.getElementById('stTxt').textContent=txt;}
+
+async function startTraining(){
+  if(busy)return;busy=true;
+  const btn=document.getElementById('tBtn');btn.disabled=true;btn.textContent='⏳ TRAINING...';setSt('go','TRAINING');
+  const W=parseInt(document.getElementById('vW').value)||20;
+  const fDays=parseInt(document.getElementById('vF').value)||10;
+  const eps=parseInt(document.getElementById('vE').value)||60;
+  const units=parseInt(document.getElementById('vU').value)||48;
+  const lr=LRS[(parseInt(document.getElementById('lrSlider').value)||3)-1];
+  updateArch(W,units);
+  const data=DB[sym];const closes=data.map(d=>d.close);
+  const{n:nAll,mn,mx}=norm(closes);const nTrain=nAll.slice(0,-fDays);
+  const{X,y}=mkSeqs(nTrain,W);
+  const xT=tf.tensor3d(X);const yT=tf.tensor2d(y,[y.length,1]);
+  mdl=buildMdl(W,units,lr);lossHist=[];
+  C.loss.data.labels=[];C.loss.data.datasets[0].data=[];C.loss.update('none');
+  await mdl.fit(xT,yT,{epochs:eps,batchSize:32,validationSplit:.1,shuffle:true,callbacks:{onEpochEnd:async(ep,logs)=>{
+    const loss=logs.loss;lossHist.push(+loss.toFixed(7));
+    const pct=Math.round((ep+1)/eps*100);
+    document.getElementById('pFill').style.width=pct+'%';
+    document.getElementById('epTxt').textContent=`EPOCH ${ep+1}/${eps}  ·  LOSS: ${loss.toExponential(3)}`;
+    document.getElementById('mLoss').textContent=loss.toExponential(2);
+    if(ep%5===0||ep===eps-1){C.loss.data.labels=lossHist.map((_,i)=>i+1);C.loss.data.datasets[0].data=[...lossHist];C.loss.update('none');}
+    await tf.nextFrame();
+  }}});
+  xT.dispose();yT.dispose();
+  const nVal=nAll.slice(-fDays);const nValWin=nAll.slice(-fDays-W,-fDays);let ww=[...nValWin];
+  let ssq=0,sabs=0;
+  for(let i=0;i<nVal.length;i++){let pn;tf.tidy(()=>{const inp=tf.tensor3d([ww.slice(-W).map(v=>[v])]);pn=mdl.predict(inp).dataSync()[0];});const pa=denorm([pn],mn,mx)[0],aa=denorm([nVal[i]],mn,mx)[0];ssq+=(aa-pa)**2;sabs+=Math.abs((aa-pa)/aa);ww.push(nVal[i]);await tf.nextFrame();}
+  const rmse=Math.sqrt(ssq/nVal.length),mape=sabs/nVal.length*100;
+  document.getElementById('mRmse').textContent='$'+rmse.toFixed(2);
+  document.getElementById('mMape').textContent=mape.toFixed(2)+'%';
+  document.getElementById('mMape').className='mc-v '+(mape<3?'g':mape<7?'':'r');
+  document.getElementById('mAcc').textContent=(100-mape).toFixed(1)+'%';
+  document.getElementById('mAcc').className=(100-mape)>93?'mc-v g':'mc-v';
+  const futPreds=[];let fw=[...nAll.slice(-W)];
+  for(let i=0;i<fDays;i++){let pn;tf.tidy(()=>{const inp=tf.tensor3d([fw.slice(-W).map(v=>[v])]);pn=mdl.predict(inp).dataSync()[0];});futPreds.push(pn);fw.push(pn);await tf.nextFrame();}
+  const futReal=denorm(futPreds,mn,mx);
+  refreshChart(data,futReal);
+  const ld=new Date(data[data.length-1].date),lc=data[data.length-1].close;
+  let html='';
+  futReal.forEach((p,i)=>{const dd=new Date(ld);dd.setDate(dd.getDate()+i+1);const dtStr=dd.toISOString().slice(0,10);const base=i===0?lc:futReal[i-1];const dayChg=(p-base)/base*100,cumChg=(p-lc)/lc*100;const up=dayChg>=0,cup=cumChg>=0;html+=`<div class="pi"><div class="pi-date">${dtStr}</div><div class="pi-price" style="color:${up?'var(--grn2)':'var(--red2)'}">\$${p.toFixed(2)}</div><div class="pi-chg ${cup?'up':'dn'}">${cup?'+':''}${cumChg.toFixed(2)}%</div></div>`;});
+  document.getElementById('predList').innerHTML=html;
+  const trend=(futReal[futReal.length-1]-lc)/lc*100;
+  const se=document.getElementById('sSig');
+  if(trend>2)se.innerHTML='<span class="sig buy">BUY</span>';else if(trend<-2)se.innerHTML='<span class="sig sell">SELL</span>';else se.innerHTML='<span class="sig hold">HOLD</span>';
+  setSt('ok','READY');btn.disabled=false;btn.textContent='▶ RETRAIN MODEL';busy=false;
+}
+
+async function init(){
+  const sub=document.getElementById('ldSub');
+  sub.textContent='LOADING TENSORFLOW.JS ENGINE...';
+  await tf.ready();sub.textContent='GENERATING MARKET DATA...';
+  await new Promise(r=>setTimeout(r,180));
+  Object.keys(SP).forEach(s=>{DB[s]=genData(s);});
+  sub.textContent='RENDERING CHARTS...';
+  await new Promise(r=>setTimeout(r,100));
+  document.getElementById('loading').style.display='none';
+  const ap=document.getElementById('app');ap.style.display='flex';
+  initCharts();refreshInfo(DB['AAPL']);refreshChart(DB['AAPL'],[]);setSt('','IDLE');
+}
+init().catch(e=>{document.getElementById('ldSub').textContent='ERROR: '+e.message;console.error(e);});
+</script>
+</body>
+</html>

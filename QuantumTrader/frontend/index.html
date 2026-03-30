@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quantum Trader 3.1 · Stable Engine</title>
+  <script src="https://unpkg.com/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div id="loading">
+    <div class="spinner"></div>
+    <div class="ld-title">QUANTUM TRADER <span style="font-size:0.4em;vertical-align:middle;color:var(--success)">v3.1</span></div>
+    <div class="ld-subtitle">Loading Advanced Neural Forecasting Engine</div>
+    <div class="ld-status" id="ldSub">Initializing TensorFlow.js System...</div>
+  </div>
+
+  <div id="app">
+    <header class="hdr">
+      <div class="logo">
+        <div class="logo-icon">Q</div>
+        <div class="logo-text">QUANTUM TRADER<br><span>ADVANCED ML FORECASTING</span></div>
+      </div>
+
+      <div class="search-box">
+        <input type="text" id="symbolSearch" placeholder="Enter Symbol (e.g. MSFT)" value="AAPL" autocomplete="off">
+        <button onclick="searchSymbol()">Scan</button>
+      </div>
+
+      <div class="sym-wrap" id="symWrap">
+        <button class="sb on" onclick="selectStock('AAPL',this)">AAPL</button>
+        <button class="sb" onclick="selectStock('TSLA',this)">TSLA</button>
+        <button class="sb" onclick="selectStock('MSFT',this)">MSFT</button>
+        <button class="sb" onclick="selectStock('GOOGL',this)">GOOGL</button>
+        <button class="sb" onclick="selectStock('NVDA',this)">NVDA</button>
+      </div>
+
+      <div class="status-wrap">
+        <div class="dot" id="stDot"></div>
+        <span class="st-txt" id="stTxt">IDLE</span>
+      </div>
+    </header>
+
+    <main class="body">
+      <section class="left-panel">
+        <div class="price-bar">
+          <div class="p-main">
+            <div class="prc-main" id="prcMain">$0.00</div>
+            <div class="prc-chg" id="prcChg">— —</div>
+          </div>
+          <div class="p-stats">
+            <div class="stat">
+              <div class="stat-l">Open</div>
+              <div class="stat-v" id="sOpen">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-l">High</div>
+              <div class="stat-v" id="sHigh">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-l">Low</div>
+              <div class="stat-v" id="sLow">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-l">Volume</div>
+              <div class="stat-v" id="sVol">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-l">RSI</div>
+              <div class="stat-v" id="sRsi">—</div>
+            </div>
+            <div class="stat">
+              <div class="stat-l">MACD</div>
+              <div class="stat-v" id="sMacd">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-container">
+          <div class="ch-hdr">
+            <div class="ch-info">
+              <span class="ch-ttl">Price History & Neural Forecast</span>
+              <div class="leg">
+                <span class="leg-i"><i style="background:#ff3366;"></i> Historical Close</span>
+                <span class="leg-i"><i style="background:#00e676;"></i> LSTM Forecast</span>
+              </div>
+            </div>
+            <div class="tf-w">
+              <button class="tf" onclick="setTF(60,this)">1M</button>
+              <button class="tf" onclick="setTF(90,this)">3M</button>
+              <button class="tf on" onclick="setTF(180,this)">6M</button>
+              <button class="tf" onclick="setTF(365,this)">1Y</button>
+              <button class="tf" onclick="setTF(730,this)">2Y</button>
+            </div>
+          </div>
+          <div class="ch-main"><canvas id="cMain"></canvas></div>
+          <div class="ch-vol"><canvas id="cVol"></canvas></div>
+        </div>
+
+        <div class="metrics">
+          <div class="mc">
+            <div class="mc-l">Val. RMSE</div>
+            <div class="mc-v" id="mRmse">—</div>
+          </div>
+          <div class="mc">
+            <div class="mc-l">Val. MAPE</div>
+            <div class="mc-v" id="mMape">—</div>
+          </div>
+          <div class="mc">
+            <div class="mc-l">Train Loss</div>
+            <div class="mc-v" id="mLoss">—</div>
+          </div>
+          <div class="mc">
+            <div class="mc-l">Prediction Acc.</div>
+            <div class="mc-v" id="mAcc">—</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="right-panel">
+        <!-- Hyperparameters Section -->
+        <div class="panel-sec">
+          <h3 class="sec-title">ML Pipeline Settings</h3>
+          <div class="ctrl-group">
+            <label>Lookback Window <span id="vW_disp">20</span>d</label>
+            <input type="range" id="vW" min="10" max="60" value="20" step="5"
+              oninput="document.getElementById('vW_disp').innerHTML=this.value">
+          </div>
+          <div class="ctrl-group">
+            <label>Forecast Horizon <span id="vF_disp">5</span>d</label>
+            <input type="range" id="vF" min="1" max="15" value="5" step="1"
+              oninput="document.getElementById('vF_disp').innerHTML=this.value">
+          </div>
+          <div class="ctrl-group">
+            <label>Max Epochs <span id="vE_disp">200</span></label>
+            <input type="range" id="vE" min="10" max="500" value="200" step="10"
+              oninput="document.getElementById('vE_disp').innerHTML=this.value">
+          </div>
+
+          <button class="train-btn" id="tBtn" onclick="startTraining()">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+            TRAIN & FORECAST
+          </button>
+
+          <div class="progress-bar-wrap">
+            <div class="prog">
+              <div class="prog-f" id="pFill"></div>
+            </div>
+            <div class="prog-text" id="epTxt">READY</div>
+          </div>
+        </div>
+
+        <!-- Models Persistence -->
+        <div class="panel-sec">
+          <h3 class="sec-title">Saved Models</h3>
+          <div class="models-grid">
+            <button class="btn-sec" onclick="saveModel()">💾 Save</button>
+            <button class="btn-sec" onclick="loadModel()">📂 Load</button>
+            <button class="btn-sec" onclick="clearModels()">🗑️ Clear</button>
+          </div>
+          <div class="saved-model-info" id="modelStatusMsg">No model loaded.</div>
+        </div>
+
+        <div class="panel-sec">
+          <h3 class="sec-title">Quantum Architecture</h3>
+          <div class="arch-viz">
+            <div class="a-box inp">Input (Multivariate [9])</div>
+            <div class="a-arr">↓</div>
+            <div class="a-box lstm">LSTM (256 units) + BN</div>
+            <div class="a-arr">↓</div>
+            <div class="a-box lstm">LSTM (128 units) + BN</div>
+            <div class="a-arr">↓</div>
+            <div class="a-box lstm">LSTM (64 units) + BN</div>
+            <div class="a-arr">↓</div>
+            <div class="a-box dense">Dense (64 units, Swish)</div>
+            <div class="a-arr">↓</div>
+            <div class="a-box dense">Dense (32 units, ReLU)</div>
+            <div class="a-arr">↓</div>
+            <div class="a-box out">Dense (<span id="outDays">5</span>) → Price Prediction</div>
+          </div>
+        </div>
+
+        <div class="panel-sec">
+          <h3 class="sec-title">Training Curve</h3>
+          <div class="loss-chart"><canvas id="cLoss"></canvas></div>
+        </div>
+
+        <div class="panel-sec forecast-sec">
+          <h3 class="sec-title">Next Forecast</h3>
+          <div class="pred-list" id="predList">
+            <div class="empty-msg">Waiting for trained model...</div>
+          </div>
+        </div>
+
+      </aside>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+
+</html>
